@@ -3,9 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <title>Syllabi to Calendar</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 600px;
+            margin: 2rem auto;
+            padding: 1rem;
+            background-color: #f5f5f5;
+            border-radius: 8px;
+        }
+        h1 {
+            text-align: center;
+        }
+        .instructions {
+            margin: 1rem 0;
+            padding: 1rem;
+            background: #e0f7fa;
+            border-radius: 6px;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+    </style>
 </head>
 <body>
-    <h1>Welcome to Syllabi to Calendar</h1>
-    <p>This will become a full-stack app that extracts important dates from syllabi and adds them to your Google Calendar.</p>
+    <h1>Syllabi to Calendar</h1>
+    <div class="instructions">
+        <p><strong>How to use:</strong></p>
+        <ul>
+            <li>Upload a PDF syllabus (English text only for now).</li>
+            <li>Ensure the syllabus includes clear due dates (e.g., "Assignment 1 due September 15").</li>
+            <li>Do not upload image-based scans - OCR is not supported (yet).</li>
+        </ul>
+    </div>
+    
+    <form action="/upload" method="POST" enctype="multipart/form-data">
+        <label for="file">Choose your syllabus (PDF):</label>
+        <input type="file" id="file" name="file" accept=".pdf" required>
+        <button type="submit">Upload and Process</button>
+    </form>
 </body>
 </html>
