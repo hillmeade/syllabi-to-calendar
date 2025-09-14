@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Parsed Results</title>
+</head>
+<body>
+  <h1>Extracted PDF Text</h1>
+
+  {% if text %}
+    <pre>{{ text }}</pre>
+  {% else %}
+    <p>No text extracted.</p>
+  {% endif %}
+
+  <a href="{{ url_for('home') }}">Back to Home</a>
+</body>
+</html>
