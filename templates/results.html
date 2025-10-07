@@ -2,17 +2,38 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Parsed Results</title>
+  <title>Results - Syllabi to Calendar</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; }
+    h1, h2 { color: #333; }
+    .event-list { margin-top: 1rem; }
+    .event-item { margin-bottom: 0.5rem; }
+    .raw-text { white-space: pre-wrap; background: #f4f4f4; padding: 1rem; border-radius: 5px; }
+    .back-button { margin-top: 1.5rem; display: inline-block; padding: 0.5rem 1rem; background: #007bff; color: white; text-decoration: none; border-radius: 5px; }
+    .back-button:hover { background: #0056b3; }
+  </style>
 </head>
 <body>
-  <h1>Extracted PDF Text</h1>
+  <h1>Upload Results</h1>
 
-  {% if text %}
-    <pre>{{ text }}</pre>
-  {% else %}
-    <p>No text extracted.</p>
-  {% endif %}
+  <h2>Extracted Event-Date Pairs:</h2>
+  <div class="event-list">
+    {% if events_and_dates %}
+      <ul>
+        {% for item in events_and_dates %}
+          <li class="event-item"><strong>{{ item.date }}</strong>: {{ item.event }}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>No events detected.</p>
+    {% endif %}
+  </div>
 
-  <a href="{{ url_for('home') }}">Back to Home</a>
+  <h2>Raw Extracted Text:</h2>
+  <div class="raw-text">
+    {{ text }}
+  </div>
+
+  <a href="{{ url_for('home') }}" class="back-button">Back to Home</a>
 </body>
 </html>

@@ -2,7 +2,14 @@ from flask import Flask, render_template, request, redirect, url_for, flash
 from werkzeug.utils import secure_filename
 import os
 import pdfplumber
-import re
+import ollama
+import json
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -10,14 +17,15 @@ app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'pdf'}
 
-
 # Tells Flask where to save uploads, secret key is needed for flash messages
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.secret_key = 'supersecretkey'
 
-
 # Ensures uploads folder exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Google Calendar API Scope
+SCOPES = ['https://www.googleapis.com/auth/calendar']
 
 """
 # Name: allowed_file - File Type Validator
@@ -28,7 +36,6 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 def allowed_file(filename):
     # Checks if there is a '.' in the filename and gets the extension after the last dot
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
 
 
 """
@@ -45,6 +52,7 @@ def home():
 
     # Renders the home HTML template a makes the message variable available to use in the template to display messages
     return render_template('home.html', message=message)
+
 
 """
 # Name: upload_file - File Upload Route Handler
@@ -87,16 +95,17 @@ def upload_file():
             for page in pdf.pages:
                 # Append text from each page with the newline operator
                 text += page.extract_text() + "\n"
-        
-        # Extract dates from the extracted text
-        dates = extract_dates(text)
-        # Prints detected dates to the terminal for debugging
-        print("---- Detected Dates ----")
-        print(dates)
 
+        # Extracts events and dates using Ollama 
+        events_and_dates = extract_events_with_ollama(text)
+
+        # Debug: print to terminal
+        print("---- Detected Events + Dates (Ollama) ----")
+        print(events_and_dates)
+        
         # Flashes a success message
         flash('File uploaded successfully!')
-        return render_template('results.html', text=text)
+        return render_template('results.html', text=text, events_and_dates=events_and_dates)
     else:
         # Flashes an error message
         flash('Invalid file type. Please upload a PDF.')
@@ -105,35 +114,72 @@ def upload_file():
 
 
 """
-# Name: extract_dates - PDF Date Extractor
-# Desc: Extracts date strings from a block of text using regular expressions. Supports common formats like "Sept 10", "10/05/25", and "10-05-2025".
-# Precondition: text is a string containing extracted text from a PDF or other source
-# Postcondition: Returns a list of date strings found in the text
+# Name: extract_events_with_ollama - AI-Powered Event Extractor
+# Desc: Uses Ollama's llama3.2 model to extract important dates and events from syllabus text
+# Precondition: text is a string containing extracted PDF content, Ollama service is running
+# Postcondition: Returns a list of dictionaries with 'event' and 'date' keys
 """
-def extract_dates(text):
-    # Normalize whitespace: replaces multiple spaces/newlines with a single space
-    cleaned = re.sub(r'\s+', ' ', text)
-
-    # List of regex patterns for several common date formats
-    date_patterns = [
-        # Pattern 1: Month Names and day e.g (October 15, Sept 5, Aug 10)
-        r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2}\b',   
-        # Pattern 2: Slash-separated dates e.g. (10/15/25, 9/10/2025)
-        r'\b\d{1,2}/\d{1,2}/\d{2,4}\b',   
-        # Pattern 3: Dash-seperated dates e.g. (10-05-25, 9-10-2025)                                                
-        r'\b\d{1,2}-\d{1,2}-\d{2,4}\b'                                                    
+def extract_events_with_ollama(text):
+    prompt = f"""
+    You are analyzing a course syllabus. Extract all important dates and events.
+    Return ONLY a JSON array of objects with this format:
+    [
+        {{"event": "Assignment 1", "date": "September 15"}}
+        {{"event": "Midterm Exam", "date": "October 20"}}
     ]
+    Important:
+    - Include assignments, exams, quizzes, project deadlines, and other academic events
+    - Use clear, concise event names
+    - Keep dates in a readable format (e.g., "September 15" or "Sept 15")
+    - Return ONLY the JSON array, no other text
 
-    # List to store all matched date strings
-    dates = []
-    for pattern in date_patterns:
-        # Finds all matches for the current pattern (case-insensitive)
-        matches = re.findall(pattern, cleaned, flags=re.IGNORECASE)
-        # Adds matches to the overall list
-        dates.extend(matches)
+    Syllabus text:
+    {text}
+    """
+
+    try:
+        # Sends a request to Ollama
+        response = ollama.chat(model='llama3.2', messages=[{'role': 'user', 'content': prompt}])
+
+        # Extracts the response text
+        response_text = response['message']['content']
+
+        # Parses JSON response
+        events = json.loads(response_text)
+        return events
     
-    return dates
+    except Exception as e:
+        print(f"Error extracting eevnts: {e}")
+        return []
+    
 
+"""
+# Name: get_calendar_service - Google Calendar API Authentication
+# Desc: Authenticates user with Google Calendar API and returns an authorized service object for making API calls
+# Precondition: credentials.json exists in project root, Google Calendar API is enabled in Google Cloud Console
+# Postcondition: Returns an authenticated Google Calendar service object, creates/refreshes token.json for future use
+"""
+def get_calendar_service():
+    creds = None
+
+    # Token.json stores the user's access and refresh tokens
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+
+    # If there are no valid credentials, let the user log in
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+        
+        # Saves the credentials for the next run
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+    
+    service = build('calendar', 'v3', credentials=creds)
+    return service
 
 # Only starts the web server if this file is being run directly
 if __name__ == '__main__':

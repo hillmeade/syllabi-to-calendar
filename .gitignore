@@ -3,4 +3,5 @@ __pycache__/
 .vscode/
 *.pyc
 uploads/
-venv/
+credentials.json
+token.json
