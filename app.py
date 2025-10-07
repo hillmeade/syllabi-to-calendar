@@ -4,12 +4,14 @@ import os
 import pdfplumber
 import ollama
 import json
+import re
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from datetime import datetime
+from dateutil import parser as date_parser
 
 app = Flask(__name__)
 
@@ -102,7 +104,14 @@ def upload_file():
         # Debug: print to terminal
         print("---- Detected Events + Dates (Ollama) ----")
         print(events_and_dates)
-        
+
+        # Adds events to Google Calendar
+        if events_and_dates:
+            added_count = add_events_to_calendar(events_and_dates)
+            flash(f'File uploaded successfully! Added {added_count} events to your calendar.')
+        else:
+            flash('File uploaded but no events were detected.')
+
         # Flashes a success message
         flash('File uploaded successfully!')
         return render_template('results.html', text=text, events_and_dates=events_and_dates)
@@ -121,35 +130,48 @@ def upload_file():
 """
 def extract_events_with_ollama(text):
     prompt = f"""
-    You are analyzing a course syllabus. Extract all important dates and events.
-    Return ONLY a JSON array of objects with this format:
-    [
-        {{"event": "Assignment 1", "date": "September 15"}}
-        {{"event": "Midterm Exam", "date": "October 20"}}
-    ]
-    Important:
-    - Include assignments, exams, quizzes, project deadlines, and other academic events
-    - Use clear, concise event names
-    - Keep dates in a readable format (e.g., "September 15" or "Sept 15")
-    - Return ONLY the JSON array, no other text
+Extract all important academic dates and events from this syllabus.
 
-    Syllabus text:
-    {text}
-    """
+Return ONLY valid JSON in this EXACT format (no extra text, no explanations):
+[
+  {{"event": "Assignment 1", "date": "September 15"}},
+  {{"event": "Midterm Exam", "date": "October 20"}}
+]
+
+Rules:
+- Return ONLY the JSON array
+- Each object must have "event" and "date" keys
+- Use proper JSON syntax with commas between objects
+- Include assignments, exams, quizzes, project deadlines
+- Keep event names clear and concise
+- Use readable date format (e.g., "September 15" or "Sept 15")
+
+Syllabus text:
+{text[:3000]}
+"""
 
     try:
         # Sends a request to Ollama
         response = ollama.chat(model='llama3.2', messages=[{'role': 'user', 'content': prompt}])
 
         # Extracts the response text
-        response_text = response['message']['content']
+        response_text = response['message']['content'].strip()
+
+        # Tries to find JSON array in the response (in case of extra text)
+        json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if json_match:
+            response_text = json_match.group()
 
         # Parses JSON response
         events = json.loads(response_text)
         return events
     
+    except json.JSONDecodeError as e:
+        print(f"JSON parsing error: {e}")
+        print(f"Response was: {response_text[:500]}")
+        return []
     except Exception as e:
-        print(f"Error extracting eevnts: {e}")
+        print(f"Error extracting events: {e}")
         return []
     
 
@@ -172,7 +194,7 @@ def get_calendar_service():
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
+            creds = flow.run_local_server(port=8080)
         
         # Saves the credentials for the next run
         with open('token.json', 'w') as token:
@@ -181,6 +203,54 @@ def get_calendar_service():
     service = build('calendar', 'v3', credentials=creds)
     return service
 
+"""
+# Name: add_events_to_calendar - Calendar Event Creator
+# Desc: Takes a list of event dictionaries and adds them to the user's Google Calendar
+# Precondition: events is a list of dicts with 'event' and 'date' keys, user is authenticated with Google Calendar API
+# Postcondition: Creates calendar events for each item in the list, returns count of successfully added events
+"""
+def add_events_to_calendar(events):
+    try:
+        service = get_calendar_service()
+        added_count = 0
+        
+        for item in events:
+            event_name = item.get('event', 'Untitled Event')
+            date_str = item.get('date', '')
+
+            try:
+                # Parses the date with the current year - dateutil handles format variations
+                event_date = date_parser.parse(f"{date_str} {datetime.now().year}")         
+            except Exception as e:
+                print(f"Error parsing date: {date_str}")
+                continue
+
+            # Creates the event
+            event_body = {
+                'summary': event_name,
+                'start': {
+                    'date': event_date.strftime('%Y-%m-%d'),
+                    'timeZone': 'America/New_York',
+                },
+                'end': {
+                    'date': event_date.strftime('%Y-%m-%d'),
+                    'timeZone': 'America/New_York',
+                },
+                'description': f'Imported from syllabus'
+            }
+
+            # Adds event to calendar
+            event = service.events().insert(calendarId='primary', body=event_body).execute()
+            print(f"Event created: {event.get('htmlLink')}")
+            added_count += 1
+        
+        return added_count
+    
+    except HttpError as error:
+        print(f'An error occurred: {error}')
+        return 0
+    
+    
 # Only starts the web server if this file is being run directly
 if __name__ == '__main__':
     app.run(debug=True)
