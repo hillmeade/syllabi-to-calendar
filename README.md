@@ -10,7 +10,7 @@ A full-stack web application that automatically extracts important dates from co
 
 ## Tech Stack
 - **Backend:** Python, Flask
-- **Frontend:** JavaScript, HTML, CSS
+- **Frontend:** HTML, CSS
 - **APIs:** Google Calendar API
 
 ## Status
